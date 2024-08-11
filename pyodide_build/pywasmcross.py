@@ -55,6 +55,7 @@ if IS_COMPILER_INVOCATION:
     )
     # restore __name__ so that relative imports work as we expect
     __name__ = PYWASMCROSS_ARGS.pop("orig__name__")
+    WASI_SDK_PATH = PYWASMCROSS_ARGS.pop("wasi_sdk_path")
 
 
 import subprocess
@@ -262,6 +263,7 @@ def get_cmake_compiler_flags() -> list[str]:
     The commandline flags to pass to cmake.
     """
     compiler_flags = {
+        "CMAKE_TOOLCHAIN_FILE": f"{WASI_SDK_PATH}/share/cmake/wasi-sdk.cmake",
         "CMAKE_C_COMPILER": "cc",
         "CMAKE_CXX_COMPILER": "c++",
         "CMAKE_AR": "ar",
@@ -470,20 +472,20 @@ def handle_command_generate_args(  # noqa: C901
     ['emcc', 'test.c', '-Werror=implicit-function-declaration', '-Werror=mismatched-parameter-types', '-Werror=return-type']
     """
     if "-print-multiarch" in line:
-        return ["echo", "wasm32-emscripten"]
+        return ["echo", "wasm32-wasi"]
     if len(line) == 2 and line[1] == "-v":
-        return ["emcc", "-v"]
+        return [f"{WASI_SDK_PATH}/bin/clang", "-v"]
 
     cmd = line[0]
     if cmd == "c++" or cmd == "g++":
-        new_args = ["em++"]
+        new_args = [f"{WASI_SDK_PATH}/bin/clang++"]
     elif cmd in ("cc", "gcc", "ld", "lld"):
-        new_args = ["emcc"]
+        new_args = [f"{WASI_SDK_PATH}/bin/clang"]
         # distutils doesn't use the c++ compiler when compiling c++ <sigh>
         if any(arg.endswith((".cpp", ".cc")) for arg in line):
-            new_args = ["em++"]
+            new_args = [f"{WASI_SDK_PATH}/bin/clang++"]
     elif cmd == "ar":
-        line[0] = "emar"
+        line[0] = f"{WASI_SDK_PATH}/bin/ar"
         return line
     elif cmd == "cmake":
         # If it is a build/install command, or running a script, we don't do anything.
@@ -492,7 +494,6 @@ def handle_command_generate_args(  # noqa: C901
 
         flags = get_cmake_compiler_flags()
         line[:1] = [
-            "emcmake",
             "cmake",
             *flags,
             # Since we create a temporary directory and install compiler symlinks every time,
@@ -520,10 +521,10 @@ def handle_command_generate_args(  # noqa: C901
         # See: https://github.com/mesonbuild/meson/issues/8027
         return ["echo", *line]
     elif cmd == "ranlib":
-        line[0] = "emranlib"
+        line[0] = f"{WASI_SDK_PATH}/bin/ranlib"
         return line
     elif cmd == "strip":
-        line[0] = "emstrip"
+        line[0] = f"{WASI_SDK_PATH}/bin/strip"
         return line
     else:
         return line
@@ -562,12 +563,12 @@ def handle_command_generate_args(  # noqa: C901
     if is_link_cmd(line):
         new_args.append("-Wl,--fatal-warnings")
         new_args.extend(build_args.ldflags.split())
-        new_args.extend(get_export_flags(line, build_args.exports))
+        # new_args.extend(get_export_flags(line, build_args.exports))
 
     if "-c" in line:
-        if new_args[0] == "emcc":
+        if new_args[0] == f"{WASI_SDK_PATH}/bin/clang":
             new_args.extend(build_args.cflags.split())
-        elif new_args[0] == "em++":
+        elif new_args[0] == f"{WASI_SDK_PATH}/bin/clang++":
             new_args.extend(build_args.cflags.split() + build_args.cxxflags.split())
 
         if build_args.pythoninclude:
