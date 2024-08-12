@@ -263,7 +263,7 @@ def get_cmake_compiler_flags() -> list[str]:
     The commandline flags to pass to cmake.
     """
     compiler_flags = {
-        "CMAKE_TOOLCHAIN_FILE": f"{WASI_SDK_PATH}/share/cmake/wasi-sdk.cmake",
+        # "CMAKE_TOOLCHAIN_FILE": f"{WASI_SDK_PATH}/share/cmake/wasi-sdk.cmake",
         "CMAKE_C_COMPILER": "cc",
         "CMAKE_CXX_COMPILER": "c++",
         "CMAKE_AR": "ar",
@@ -274,7 +274,8 @@ def get_cmake_compiler_flags() -> list[str]:
     flags = []
     symlinks_dir = Path(sys.argv[0]).parent
     for key, value in compiler_flags.items():
-        assert value in SYMLINKS
+        if key != "CMAKE_TOOLCHAIN_FILE":
+            assert value in SYMLINKS
 
         flags.append(f"-D{key}={symlinks_dir / value}")
 
