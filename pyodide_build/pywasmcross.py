@@ -171,6 +171,7 @@ def replay_genargs_handle_linker_opts(arg: str) -> str | None:
     assert arg.startswith("-Wl")
     link_opts = arg.split(",")[1:]
     new_link_opts = ["-Wl"]
+    rpath = False
     for opt in link_opts:
         if opt in [
             "-Bsymbolic-functions",
@@ -180,6 +181,9 @@ def replay_genargs_handle_linker_opts(arg: str) -> str | None:
             # wasm-ld does not recognize some link flags
             "--sort-common",
             "--as-needed",
+            "--allow-shlib-undefined",
+            "--start-group",
+            "--end-group",
         ]:
             continue
 
@@ -192,6 +196,18 @@ def replay_genargs_handle_linker_opts(arg: str) -> str | None:
                 "--exclude-libs=",
             )
         ):
+            continue
+
+        if opt.startswith(
+            (
+                "-rpath",
+            )
+        ):
+            rpath = True
+            continue
+
+        if rpath:
+            rpath = False
             continue
 
         new_link_opts.append(opt)
@@ -220,6 +236,9 @@ def replay_genargs_handle_argument(arg: str) -> str | None:
 
     # Don't include any system directories
     if arg.startswith("-L/usr"):
+        return None
+
+    if arg.startswith("-L/lib"):
         return None
 
     # fmt: off
@@ -368,7 +387,7 @@ def calculate_object_exports_readobj(objects: list[str]) -> list[str] | None:
 
 
 def calculate_object_exports_nm(objects: list[str]) -> list[str]:
-    args = ["emnm", "-j", "--export-symbols"] + objects
+    args = [f"{WASI_SDK_PATH}/bin/nm", "-j", "--export-symbols"] + objects
     result = subprocess.run(
         args, encoding="utf8", capture_output=True, env={"PATH": os.environ["PATH"]}
     )
@@ -425,21 +444,23 @@ def get_export_flags(
     """
     if exports == "whole_archive":
         return
-    yield "-sSIDE_MODULE=2"
+    # yield "-sSIDE_MODULE=2"
     if isinstance(exports, str):
         export_list = calculate_exports(line, exports == "requested")
     else:
         export_list = exports
 
-    prefixed_exports = ["_" + x for x in export_list]
+    # prefixed_exports = ["_" + x for x in export_list]
 
-    import tempfile
+    # import tempfile
 
-    with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
-        # Use a response file to avoid command line length limits
-        f.write(json.dumps(prefixed_exports))
+    # with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+    #     # Use a response file to avoid command line length limits
+    #     f.write(json.dumps(prefixed_exports))
 
-    yield f"-sEXPORTED_FUNCTIONS=@{f.name}"
+    # yield f"-sEXPORTED_FUNCTIONS=@{f.name}"
+    for export in export_list:
+        yield f"-Wl,--export={export}"
 
 
 def handle_command_generate_args(  # noqa: C901
@@ -475,16 +496,16 @@ def handle_command_generate_args(  # noqa: C901
     if "-print-multiarch" in line:
         return ["echo", "wasm32-wasi"]
     if len(line) == 2 and line[1] == "-v":
-        return [f"{WASI_SDK_PATH}/bin/clang", "-v"]
+        return [f"{WASI_SDK_PATH}/bin/wasm32-wasip1-clang", "-v"]
 
     cmd = line[0]
     if cmd == "c++" or cmd == "g++":
-        new_args = [f"{WASI_SDK_PATH}/bin/clang++"]
+        new_args = [f"{WASI_SDK_PATH}/bin/wasm32-wasip1-clang++"]
     elif cmd in ("cc", "gcc", "ld", "lld"):
-        new_args = [f"{WASI_SDK_PATH}/bin/clang"]
+        new_args = [f"{WASI_SDK_PATH}/bin/wasm32-wasip1-clang"]
         # distutils doesn't use the c++ compiler when compiling c++ <sigh>
         if any(arg.endswith((".cpp", ".cc")) for arg in line):
-            new_args = [f"{WASI_SDK_PATH}/bin/clang++"]
+            new_args = [f"{WASI_SDK_PATH}/bin/wasm32-wasip1-clang++"]
     elif cmd == "ar":
         line[0] = f"{WASI_SDK_PATH}/bin/ar"
         return line
@@ -562,14 +583,14 @@ def handle_command_generate_args(  # noqa: C901
     # set linker and C flags to error on anything to do with function declarations being wrong.
     # Better to fail at compile or link time.
     if is_link_cmd(line):
-        new_args.append("-Wl,--fatal-warnings")
+        # new_args.append("-Wl,--fatal-warnings")
         new_args.extend(build_args.ldflags.split())
-        # new_args.extend(get_export_flags(line, build_args.exports))
+        new_args.extend(get_export_flags(line, build_args.exports))
 
     if "-c" in line:
-        if new_args[0] == f"{WASI_SDK_PATH}/bin/clang":
+        if new_args[0] == f"{WASI_SDK_PATH}/bin/wasm32-wasip1-clang":
             new_args.extend(build_args.cflags.split())
-        elif new_args[0] == f"{WASI_SDK_PATH}/bin/clang++":
+        elif new_args[0] == f"{WASI_SDK_PATH}/bin/wasm32-wasip1-clang++":
             new_args.extend(build_args.cflags.split() + build_args.cxxflags.split())
 
         if build_args.pythoninclude:
@@ -609,6 +630,8 @@ def handle_command(
         from _f2c_fixes import scipy_fixes
 
         scipy_fixes(new_args)
+
+    print(" ".join(new_args), file=sys.stderr)
 
     result = subprocess.run(new_args)
     return result.returncode
